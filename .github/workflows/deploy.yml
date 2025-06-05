@@ -84,52 +84,33 @@ jobs:
         TF_VAR_aws_region: ${{ env.AWS_REGION }}
 
     - name: Get Terraform Outputs
-      id: terraform_outputs
-      run: |
-        echo "=== All Terraform Outputs ==="
-        terraform output
+  id: terraform_outputs
+  run: |
+    cd terraform
 
-        echo "=== Extracting Output Values ==="
-        S3_BUCKET=$(terraform output -raw s3_bucket_name 2>/dev/null | tail -n 1)
-        LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name 2>/dev/null | tail -n 1)
-        API_URL=$(terraform output -raw api_gateway_url 2>/dev/null | tail -n 1)
+    # Init Terraform
+    terraform init -input=false
 
-        echo "Raw values extracted:"
-        echo "S3_BUCKET='$S3_BUCKET'"
-        echo "LAMBDA_FUNCTION='$LAMBDA_FUNCTION'"
-        echo "API_URL='$API_URL'"
+    echo "=== Extracting Output Values ==="
+    S3_BUCKET=$(terraform output -raw s3_bucket_name 2>/dev/null | tail -n 1)
+    LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name 2>/dev/null | tail -n 1)
+    API_URL=$(terraform output -raw api_gateway_url 2>/dev/null | tail -n 1)
 
-        if [ -z "$S3_BUCKET" ]; then
-          echo "❌ Error: s3_bucket_name output not found or empty"
-          exit 1
-        fi
+    echo "Raw values extracted:"
+    echo "S3_BUCKET='$S3_BUCKET'"
+    echo "LAMBDA_FUNCTION='$LAMBDA_FUNCTION'"
+    echo "API_URL='$API_URL'"
 
-        if [ -z "$LAMBDA_FUNCTION" ]; then
-          echo "❌ Error: lambda_function_name output not found or empty"
-          exit 1
-        fi
+    if [ -z "$API_URL" ]; then
+      echo "❌ Error: api_gateway_url output not found or empty"
+      exit 1
+    fi
 
-        if [ -z "$API_URL" ]; then
-          echo "❌ Error: api_gateway_url output not found or empty"
-          exit 1
-        fi
+    # Set GitHub Action outputs
+    echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+    echo "lambda_function=$LAMBDA_FUNCTION" >> $GITHUB_OUTPUT
+    echo "api_url=$API_URL" >> $GITHUB_OUTPUT
 
-        echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
-        echo "lambda_function=$LAMBDA_FUNCTION" >> $GITHUB_OUTPUT
-        echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-
-        echo "=== GitHub Outputs Set ==="
-        echo "✅ S3 Bucket: ${S3_BUCKET}"
-        echo "✅ Lambda Function: ${LAMBDA_FUNCTION}"
-        echo "✅ API URL: ${API_URL}"
-      working-directory: ./terraform
-
-    - name: Display Deployment Info
-      run: |
-        echo "🚀 Deployment Successful!"
-        echo "📦 S3 Bucket: ${{ steps.terraform_outputs.outputs.s3_bucket }}"
-        echo "⚡ Lambda Function: ${{ steps.terraform_outputs.outputs.lambda_function }}"
-        echo "🌐 API Gateway URL: ${{ steps.terraform_outputs.outputs.api_url }}"
 
     - name: Test API Gateway
       run: |
