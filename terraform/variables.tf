@@ -1,5 +1,4 @@
 # terraform/variables.tf
-
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -7,13 +6,13 @@ variable "aws_region" {
 }
 
 variable "project_name" {
-  description = "Lambda_file_processor"
+  description = "Name of the project (used as prefix for resource names)"
   type        = string
   default     = "serverless-file-processor"
 }
 
 variable "environment" {
-  description = "Environment name"
+  description = "Environment name (dev, staging, prod)"
   type        = string
   default     = "dev"
 }
