@@ -1,5 +1,3 @@
-# .github/workflows/deploy.yml
----
 name: Deploy Serverless Application
 
 on:
@@ -18,162 +16,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Terraform Format Check
-      run: terraform fmt -check
-      working-directory: ./terraform
+      - name: Terraform Format Check
+        run: terraform fmt -check
+        working-directory: ./terraform
 
-    - name: Terraform Init
-      run: terraform init
-      working-directory: ./terraform
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
 
-    - name: Terraform Validate
-      run: terraform validate
-      working-directory: ./terraform
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./terraform
 
-    - name: Terraform Plan
-      run: terraform plan -no-color
-      working-directory: ./terraform
-      env:
-        TF_VAR_aws_region: ${{ env.AWS_REGION }}
-
-  terraform-apply:
-    name: 'Terraform Apply'
-    runs-on: ubuntu-latest
-    needs: terraform-plan
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Terraform Init
-      run: terraform init
-      working-directory: ./terraform
-
-    - name: Terraform Apply
-      run: terraform apply -auto-approve
-      working-directory: ./terraform
-      env:
-        TF_VAR_aws_region: ${{ env.AWS_REGION }}
-
-    - name: Get Terraform Outputs
-  id: terraform_outputs
-  run: |
-    cd terraform
-
-    # Init Terraform
-    terraform init -input=false
-
-    echo "=== Extracting Output Values ==="
-    S3_BUCKET=$(terraform output -raw s3_bucket_name 2>/dev/null | tail -n 1)
-    LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name 2>/dev/null | tail -n 1)
-    API_URL=$(terraform output -raw api_gateway_url 2>/dev/null | tail -n 1)
-
-    echo "Raw values extracted:"
-    echo "S3_BUCKET='$S3_BUCKET'"
-    echo "LAMBDA_FUNCTION='$LAMBDA_FUNCTION'"
-    echo "API_URL='$API_URL'"
-
-    if [ -z "$API_URL" ]; then
-      echo "❌ Error: api_gateway_url output not found or empty"
-      exit 1
-    fi
-
-    # Set GitHub Action outputs
-    echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
-    echo "lambda_function=$LAMBDA_FUNCTION" >> $GITHUB_OUTPUT
-    echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-
-
-    - name: Test API Gateway
-      run: |
-        API_URL="${{ steps.terraform_outputs.outputs.api_url }}"
-
-        if [ -z "$API_URL" ]; then
-          echo "❌ Error: API URL is empty. Cannot test API Gateway."
-          exit 1
-        fi
-
-        echo "🌐 Testing API Gateway at: $API_URL"
-
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-          -X GET "$API_URL" \
-          -H "Content-Type: application/json" \
-          --max-time 30)
-
-        echo "HTTP Status: $HTTP_STATUS"
-
-        if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
-          echo "✅ API Gateway test successful!"
-        else
-          echo "⚠️  API Gateway returned status: $HTTP_STATUS"
-        fi
-
-  lambda-update:
-    name: 'Update Lambda Function'
-    runs-on: ubuntu-latest
-    needs: terraform-apply
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Setup Terraform (for outputs)
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: ${{ env.TF_VERSION }}
-
-    - name: Get Lambda Function Name
-      id: get_lambda_name
-      run: |
-        cd terraform
-        terraform init
-        terraform output -json > tf_outputs.json
-        echo "lambda_name=$(jq -r '.lambda_function_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
-
-    - name: Create Lambda deployment package
-      run: |
-        cd lambda
-        zip -r ../lambda_function.zip .
-
-    - name: Update Lambda function code
-      run: |
-        aws lambda update-function-code \
-          --function-name ${{ steps.get_lambda_name.outputs.lambda_name }} \
-          --zip-file fileb://lambda_function.zip
+      - name: Terraform Plan
 ...
