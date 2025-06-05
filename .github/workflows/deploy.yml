@@ -95,30 +95,72 @@ jobs:
         echo "=== JSON Output File ==="
         cat tf_outputs.json
         
-        # Set GitHub outputs using JSON parsing
-        echo "s3_bucket=$(jq -r '.s3_bucket_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
-        echo "lambda_function=$(jq -r '.lambda_function_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
-        echo "api_url=$(jq -r '.api_gateway_url.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+        # Extract values with validation
+        S3_BUCKET=$(jq -r '.s3_bucket_name.value // empty' tf_outputs.json)
+        LAMBDA_FUNCTION=$(jq -r '.lambda_function_name.value // empty' tf_outputs.json)
+        API_URL=$(jq -r '.api_gateway_url.value // empty' tf_outputs.json)
+        
+        # Validate outputs exist
+        if [ -z "$S3_BUCKET" ] || [ "$S3_BUCKET" = "null" ]; then
+          echo "❌ Error: s3_bucket_name output not found or empty"
+          exit 1
+        fi
+        
+        if [ -z "$LAMBDA_FUNCTION" ] || [ "$LAMBDA_FUNCTION" = "null" ]; then
+          echo "❌ Error: lambda_function_name output not found or empty"
+          exit 1
+        fi
+        
+        if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
+          echo "❌ Error: api_gateway_url output not found or empty"
+          exit 1
+        fi
+        
+        # Set GitHub outputs
+        echo "s3_bucket=${S3_BUCKET}" >> $GITHUB_OUTPUT
+        echo "lambda_function=${LAMBDA_FUNCTION}" >> $GITHUB_OUTPUT
+        echo "api_url=${API_URL}" >> $GITHUB_OUTPUT
         
         # Verify what was written
         echo "=== GitHub Outputs Set ==="
-        echo "S3 Bucket: $(jq -r '.s3_bucket_name.value' tf_outputs.json)"
-        echo "Lambda Function: $(jq -r '.lambda_function_name.value' tf_outputs.json)"
-        echo "API URL: $(jq -r '.api_gateway_url.value' tf_outputs.json)"
+        echo "✅ S3 Bucket: ${S3_BUCKET}"
+        echo "✅ Lambda Function: ${LAMBDA_FUNCTION}"
+        echo "✅ API URL: ${API_URL}"
       working-directory: ./terraform
 
     - name: Display Deployment Info
       run: |
-        echo "�� Deployment Successful!"
+        echo "🚀 Deployment Successful!"
         echo "📦 S3 Bucket: ${{ steps.terraform_outputs.outputs.s3_bucket }}"
         echo "⚡ Lambda Function: ${{ steps.terraform_outputs.outputs.lambda_function }}"
         echo "🌐 API Gateway URL: ${{ steps.terraform_outputs.outputs.api_url }}"
 
     - name: Test API Gateway
       run: |
-        curl -X GET "${{ steps.terraform_outputs.outputs.api_url }}" \   
+        API_URL="${{ steps.terraform_outputs.outputs.api_url }}"
+        
+        # Validate URL before making request
+        if [ -z "$API_URL" ]; then
+          echo "❌ Error: API URL is empty. Cannot test API Gateway."
+          exit 1
+        fi
+        
+        echo "🌐 Testing API Gateway at: $API_URL"
+        
+        # Test the API endpoint
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X GET "$API_URL" \
           -H "Content-Type: application/json" \
-          -w "HTTP Status: %{http_code}\n"
+          --max-time 30)
+        
+        echo "HTTP Status: $HTTP_STATUS"
+        
+        if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+          echo "✅ API Gateway test successful!"
+        else
+          echo "⚠️  API Gateway returned status: $HTTP_STATUS"
+          # Don't fail the job for non-2xx responses as the API might be working but return different codes
+        fi
 
   lambda-update:
     name: 'Update Lambda Function'
@@ -161,5 +203,4 @@ jobs:
         aws lambda update-function-code \
           --function-name ${{ steps.get_lambda_name.outputs.lambda_name }} \
           --zip-file fileb://lambda_function.zip
-
 ...
