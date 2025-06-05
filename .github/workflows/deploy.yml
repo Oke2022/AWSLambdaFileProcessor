@@ -23,6 +23,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false  # This is crucial to prevent debug output
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -63,6 +64,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false  # This is crucial to prevent debug output
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -86,23 +88,30 @@ jobs:
         run: |
           cd terraform
 
-          terraform init -input=false
-
           echo "=== Extracting Output Values ==="
-          S3_BUCKET=$(terraform output -raw s3_bucket_name 2>/dev/null | tail -n 1)
-          LAMBDA_FUNCTION=$(terraform output -raw lambda_function_name 2>/dev/null | tail -n 1)
-          API_URL=$(terraform output -raw api_gateway_url 2>/dev/null | tail -n 1)
+          
+          # Use terraform output -json to get clean output
+          terraform output -json > tf_outputs.json
+          
+          # Extract values using jq
+          S3_BUCKET=$(jq -r '.s3_bucket_name.value // empty' tf_outputs.json)
+          LAMBDA_FUNCTION=$(jq -r '.lambda_function_name.value // empty' tf_outputs.json)
+          API_URL=$(jq -r '.api_gateway_url.value // empty' tf_outputs.json)
 
           echo "Raw values extracted:"
           echo "S3_BUCKET='$S3_BUCKET'"
           echo "LAMBDA_FUNCTION='$LAMBDA_FUNCTION'"
           echo "API_URL='$API_URL'"
 
-          if [ -z "$API_URL" ]; then
+          # Validate API_URL
+          if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
             echo "❌ Error: api_gateway_url output not found or empty"
+            echo "Available outputs:"
+            cat tf_outputs.json
             exit 1
           fi
 
+          # Set GitHub outputs
           echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
           echo "lambda_function=$LAMBDA_FUNCTION" >> $GITHUB_OUTPUT
           echo "api_url=$API_URL" >> $GITHUB_OUTPUT
@@ -111,24 +120,32 @@ jobs:
         run: |
           API_URL="${{ steps.terraform_outputs.outputs.api_url }}"
 
-          if [ -z "$API_URL" ] || [[ "$API_URL" == ::debug* ]]; then
-            echo "❌ Error: API URL is invalid: $API_URL"
+          echo "🌐 Testing API Gateway at: $API_URL"
+
+          # Validate URL format
+          if ! [[ "$API_URL" =~ ^https?:// ]]; then
+            echo "❌ Error: API URL does not appear to be a valid URL: $API_URL"
             exit 1
           fi
 
-          echo "🌐 Testing API Gateway at: $API_URL"
-
+          # Test the API
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -X GET "$API_URL" \
             -H "Content-Type: application/json" \
-            --max-time 30)
+            --max-time 30 \
+            --fail-with-body || echo "000")
 
           echo "HTTP Status: $HTTP_STATUS"
 
           if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
             echo "✅ API Gateway test successful!"
+          elif [ "$HTTP_STATUS" = "000" ]; then
+            echo "❌ Failed to connect to API Gateway"
+            exit 1
           else
             echo "⚠️  API Gateway returned status: $HTTP_STATUS"
+            # Don't exit with error for 4xx/5xx as the infrastructure might be working
+            # but the endpoint might return errors by design
           fi
 
   lambda-update:
@@ -152,6 +169,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false  # This is crucial to prevent debug output
 
       - name: Get Lambda Function Name
         id: get_lambda_name
@@ -159,7 +177,16 @@ jobs:
           cd terraform
           terraform init
           terraform output -json > tf_outputs.json
-          echo "lambda_name=$(jq -r '.lambda_function_name.value' tf_outputs.json)" >> $GITHUB_OUTPUT
+          LAMBDA_NAME=$(jq -r '.lambda_function_name.value // empty' tf_outputs.json)
+          
+          if [ -z "$LAMBDA_NAME" ] || [ "$LAMBDA_NAME" = "null" ]; then
+            echo "❌ Error: lambda_function_name output not found"
+            echo "Available outputs:"
+            cat tf_outputs.json
+            exit 1
+          fi
+          
+          echo "lambda_name=$LAMBDA_NAME" >> $GITHUB_OUTPUT
 
       - name: Create Lambda deployment package
         run: |
@@ -171,4 +198,3 @@ jobs:
           aws lambda update-function-code \
             --function-name ${{ steps.get_lambda_name.outputs.lambda_name }} \
             --zip-file fileb://lambda_function.zip
-...
