@@ -105,12 +105,12 @@ resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
 
 # Lambda function
 resource "aws_lambda_function" "file_processor" {
-  filename         = "lambda_function.zip"
-  function_name    = "${var.project_name}-file-processor-${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
-  timeout         = 30
+  filename      = "lambda_function.zip"
+  function_name = "${var.project_name}-file-processor-${random_string.suffix.result}"
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+  timeout       = 30
 
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
@@ -174,8 +174,8 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   http_method = aws_api_gateway_method.lambda_method.http_method
 
   integration_http_method = "POST"
-  type                   = "AWS_PROXY"
-  uri                    = aws_lambda_function.file_processor.invoke_arn
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.file_processor.invoke_arn
 }
 
 # Permission for API Gateway to invoke Lambda
